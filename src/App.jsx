@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { Upload, CheckCircle2, XCircle, Download, Square, FileSpreadsheet } from "lucide-react";
 
-const API_BASE = "https://brandtrace-backend-production.up.railway.app";
-const BRANDS = ["Sunlight", "Sunsilk", "Surf Excel", "Lifebuoy", "Knorr", "Rin", "Glow & Lovely", "Dove", "Rafhan", "Clear"];
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "http://localhost:3001"; const BRANDS = ["Sunlight", "Sunsilk", "Surf Excel", "Lifebuoy", "Knorr", "Rin", "Glow & Lovely", "Dove", "Rafhan", "Clear"];
 
 const STATUS_META = {
   done: { label: "DONE", color: "#4ADE80", icon: CheckCircle2 },
