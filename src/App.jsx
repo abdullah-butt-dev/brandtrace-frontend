@@ -9,6 +9,25 @@ const STATUS_META = {
   failed: { label: "FAILED", color: "#F87171", icon: XCircle },
 };
 
+// Short on-screen labels + hover tooltips for the diagnostic notes the
+// backend attaches to a zero-brand result. Without these, "genuinely no
+// brand in the image" and "OCR/Groq failed to determine that" both rendered
+// as an identical plain "—", which is exactly the ambiguity that caused
+// confusion earlier — this mirrors what the exported spreadsheet already
+// shows, so the live view and the download agree.
+const NOTE_LABELS = {
+  NO_TEXT_DETECTED: "no text found",
+  GROQ_QUOTA_EXCEEDED: "quota hit — rerun later",
+  GROQ_INCOMPLETE: "brand check incomplete",
+  GROQ_FAILED: "brand check failed",
+};
+const NOTE_TOOLTIPS = {
+  NO_TEXT_DETECTED: "OCR/Gemini extracted no readable text from this image — this is not necessarily 'no brand present', just that nothing was legible to read.",
+  GROQ_QUOTA_EXCEEDED: "Groq's daily token quota was exhausted during this run. This row needs to be re-processed after the quota resets.",
+  GROQ_INCOMPLETE: "The brand-matching step failed for this row after retrying. The extracted text was not lost, but brand matching could not complete.",
+  GROQ_FAILED: "The brand-matching step failed for this row after retrying twice.",
+};
+
 function formatBytes(b) {
   if (!b) return "—";
   if (b < 1024) return `${b} B`;
@@ -37,7 +56,21 @@ export default function App() {
   }, [rows]);
 
   function upsertRow(rowIdx, patch) {
-    setRowsMap((prev) => ({ ...prev, [rowIdx]: { ...(prev[rowIdx] || { rowIdx }), ...patch } }));
+    setRowsMap((prev) => {
+      const existing = prev[rowIdx] || { rowIdx };
+      const merged = { ...existing };
+      // Skip any key whose value is `undefined` in this patch instead of
+      // letting a plain spread write it over an existing value. Without this,
+      // `{ ...existing, ...{ brands: undefined } }` still sets `brands` to
+      // undefined — spreading a key with an undefined value overwrites, it
+      // does not skip — which wiped out `brands` every time row_done fired,
+      // even after brands_ready had already set the real result (or, as with
+      // the rescue pass, would set it again later).
+      for (const key of Object.keys(patch)) {
+        if (patch[key] !== undefined) merged[key] = patch[key];
+      }
+      return { ...prev, [rowIdx]: merged };
+    });
   }
 
   async function startUpload(file) {
@@ -79,13 +112,13 @@ export default function App() {
           size: evt.size,
           status: evt.status,
           timeSec: evt.timeSec,
-          brands: evt.status === "failed" ? [] : undefined, // leave existing brands alone if already set
+          brands: evt.status === "failed" ? [] : undefined, // upsertRow now actually skips undefined, so this genuinely leaves existing brands (or the pending state) alone
         });
         setProgress({ processed: evt.processedCount, total: evt.totalCount });
       }
 
       if (evt.type === "brands_ready") {
-        upsertRow(evt.rowIdx, { brands: evt.brands });
+        upsertRow(evt.rowIdx, { brands: evt.brands, brandsNote: evt.note });
       }
 
       if (evt.type === "chunk_saved") {
@@ -204,7 +237,7 @@ export default function App() {
             <input className="col-input" placeholder='Image URL column (default: "Photo Taken")'
               value={urlColumn} onChange={(e) => setUrlColumn(e.target.value)} disabled={phase === "running"} />
             <button className="btn" onClick={useSampleFile} disabled={phase === "running"}>
-              <FileSpreadsheet size={14} /> Try sample file (15 images)
+              <FileSpreadsheet size={14} /> Try sample file (10 images)
             </button>
           </div>
         </div>
@@ -254,7 +287,9 @@ export default function App() {
                           ? <span className="pending-cell">cleaning...</span>
                           : r.brands.length
                             ? r.brands.map((b, i) => <span className="brand-tag" key={i}>{b}</span>)
-                            : <span className="no-brands">—</span>}
+                            : <span className="no-brands" title={NOTE_TOOLTIPS[r.brandsNote] || ""}>
+                                {NOTE_LABELS[r.brandsNote] || "—"}
+                              </span>}
                       </td>
                     </tr>
                   );
